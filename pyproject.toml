@@ -1,0 +1,229 @@
+# ================================================
+# Project Configuration
+# ================================================
+
+[project]
+name = "aws-resource-inventory"
+version = "1.0.0"
+description = "Comprehensive AWS resource inventory tool for scanning all resources across an AWS Organization"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["aws", "inventory", "scanner", "organization", "boto3", "sso"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "rich>=13.0.0",
+    "colorama>=0.4.6",
+    "python-dateutil>=2.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/asian-code/aws-resource-inventory"
+Repository = "https://github.com/asian-code/aws-resource-inventory"
+Issues = "https://github.com/asian-code/aws-resource-inventory/issues"
+
+[project.scripts]
+aws-inventory = "aws_resource_inventory.main:main"
+
+# ================================================
+# Build System
+# ================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ================================================
+# Development Dependencies
+# ================================================
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.0",
+    "pyright>=1.1.400",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pre-commit>=3.0.0",
+    "pandas-stubs>=2.0.0",
+    "boto3-stubs[essential]>=1.34.0",
+    "types-python-dateutil>=2.8.0",
+]
+
+# ================================================
+# Linting and Formatting (Ruff)
+# ================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+# Exclude directories
+exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Enable specific rule sets
+select = [
+    # Core rules
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "I",      # isort
+    
+    # Quality and style
+    "B",      # flake8-bugbear (common bugs)
+    "Q",      # flake8-quotes
+    "SIM",    # flake8-simplify
+    "FLY",    # flynt (string formatting)
+    "PERF",   # Perflint (performance)
+    "RUF",    # Ruff-specific rules
+    
+    # Documentation
+    "D",      # pydocstyle
+    
+    # Error prevention
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez (timezone aware)
+    "T20",    # flake8-print (no print statements)
+    "RET",    # flake8-return
+    "PTH",    # flake8-use-pathlib
+]
+
+ignore = [
+    "D100",   # Missing docstring in public module
+    "D104",   # Missing docstring in public package
+    "D203",   # 1 blank line required before class docstring (conflicts with D211)
+    "D213",   # Multi-line docstring summary should start at the second line
+    "T201",   # Allow print statements (we use rich console)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D",      # Don't require docstrings in tests
+    "S101",   # Allow assert in tests
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["aws_resource_inventory"]
+force-sort-within-sections = true
+
+# ================================================
+# Static Type Checking (Pyright)
+# ================================================
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+]
+
+# Python version and environment
+pythonVersion = "3.11"
+pythonPlatform = "All"
+
+# Type checking mode
+typeCheckingMode = "standard"
+
+# Useful diagnostics
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportMissingTypeStubs = false
+reportUnusedImport = "error"
+reportUnusedVariable = "warning"
+reportOptionalSubscript = "error"
+reportOptionalMemberAccess = "error"
+reportGeneralTypeIssues = "error"
+
+# Strict settings (enable gradually)
+# strictListInference = true
+# strictDictionaryInference = true
+# strictParameterNoneValue = true
+
+# ================================================
+# Testing (Pytest)
+# ================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Add current directory to path
+pythonpath = ["src"]
+
+# Coverage options
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=aws_resource_inventory",
+    "--cov-report=html",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml",
+    "-vv",
+]
+
+# Markers for organizing tests
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "tests/*",
+    "**/__pycache__/*",
+    "**/venv/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

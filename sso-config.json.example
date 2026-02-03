@@ -1,0 +1,9 @@
+{
+  "sso_start_url": "https://your-sso-portal.awsapps.com/start/#",
+  "sso_region": "us-east-1",
+  "role_name": "YOUR-ROLE-NAME",
+  "target_regions": ["us-east-1", "us-west-2"],
+  "max_workers": 35,
+  "output_dir": "output",
+  "account_blacklist": []
+}
