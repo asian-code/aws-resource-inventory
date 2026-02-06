@@ -67,16 +67,21 @@ make run           # Run the scanner
 
 ## Configuration File
 
-Edit `sso-config.json`:
+Copy and edit `inventory-config.json` from the example:
+
+```bash
+cp inventory-config.json.example inventory-config.json
+```
 
 ```json
 {
-  "sso_start_url": "https://your-sso.awsapps.com/start",
-  "sso_region": "us-east-1",
-  "role_name": "YourRoleName",
+  "cross_account_role_name": "AWSControlTowerExecution",
   "target_regions": ["us-east-1", "us-west-2"],
   "max_workers": 20,
-  "account_blacklist": []
+  "account_blacklist": [],
+  "output_dir": "output",
+  "s3_bucket": null,
+  "s3_prefix": ""
 }
 ```
 

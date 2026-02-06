@@ -10,6 +10,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Tuple
 from collections import defaultdict
+from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
@@ -17,7 +18,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 from aws_resource_inventory.config import load_config, Config
-from aws_resource_inventory.aws_auth import SSOAuthenticator
+from aws_resource_inventory.aws_auth import OIDCAuthenticator
 from aws_resource_inventory.scanners import get_all_scanners, ScanResult
 from aws_resource_inventory.excel_exporter import create_inventory_report
 
@@ -36,15 +37,13 @@ console = Console()
 class AWSResourceInventory:
     """Main orchestrator for scanning AWS resources across an organization"""
     
-    def __init__(self, config_path: str = 'sso-config.json'):
+    def __init__(self, config_path: str = 'inventory-config.json'):
         """Initialize the inventory scanner"""
         self.config = load_config(config_path)
         
-        # Initialize SSO authenticator
-        self.authenticator = SSOAuthenticator(
-            sso_start_url=self.config.sso_start_url,
-            sso_region=self.config.sso_region,
-            role_name=self.config.role_name
+        # Initialize OIDC authenticator with cross-account role
+        self.authenticator = OIDCAuthenticator(
+            cross_account_role_name=self.config.cross_account_role_name
         )
         
         # Get all available scanners
@@ -54,6 +53,7 @@ class AWSResourceInventory:
         self.results: Dict[str, ScanResult] = {}
         self.all_errors: List[str] = []
         self.accounts_scanned = 0
+        self.output_files: List[Path] = []
     
     def _scan_account(
         self, 
@@ -102,13 +102,14 @@ class AWSResourceInventory:
             border_style="cyan"
         ))
         
-        # Authenticate
-        console.print("\n[yellow]🔐 Authenticating with AWS SSO...[/yellow]")
-        if not self.authenticator.authenticate():
-            console.print("[red]❌ Authentication failed. Exiting.[/red]")
+        # Verify credentials (OIDC credentials from environment)
+        console.print("\n[yellow]🔐 Verifying AWS credentials...[/yellow]")
+        if not self.authenticator.verify_credentials():
+            console.print("[red]❌ Credential verification failed. Exiting.[/red]")
             sys.exit(1)
+        console.print("[green]✅ AWS credentials verified[/green]")
         
-        # Get list of accounts
+        # Get list of accounts from Organizations
         console.print("[yellow]📋 Fetching AWS Organization accounts...[/yellow]")
         all_accounts = self.authenticator.list_accounts()
         
@@ -233,12 +234,12 @@ class AWSResourceInventory:
         if self.all_errors:
             console.print(f"[bold]Errors/Skipped:[/bold] [yellow]{len(self.all_errors)}[/yellow]")
     
-    def export_to_excel(self):
-        """Export results to Excel file"""
+    def export_to_excel(self) -> List[Path]:
+        """Export results to Excel files"""
         # Convert results dict to list
         results_list = list(self.results.values())
         
-        output_file = create_inventory_report(
+        self.output_files = create_inventory_report(
             results=results_list,
             errors=self.all_errors,
             output_dir=self.config.output_dir,
@@ -246,7 +247,35 @@ class AWSResourceInventory:
             regions_scanned=len(self.config.target_regions)
         )
         
-        return output_file
+        return self.output_files
+    
+    def upload_to_s3(self) -> bool:
+        """Upload output files to S3 bucket if configured"""
+        if not self.config.s3_bucket:
+            console.print("[yellow]ℹ️  S3 bucket not configured, skipping upload[/yellow]")
+            return False
+        
+        if not self.output_files:
+            console.print("[yellow]⚠️  No files to upload[/yellow]")
+            return False
+        
+        import boto3
+        s3 = boto3.client('s3')
+        
+        console.print(f"\n[yellow]☁️  Uploading files to s3://{self.config.s3_bucket}/{self.config.s3_prefix}[/yellow]")
+        
+        uploaded = 0
+        for file_path in self.output_files:
+            try:
+                s3_key = f"{self.config.s3_prefix}{file_path.name}" if self.config.s3_prefix else file_path.name
+                s3.upload_file(str(file_path), self.config.s3_bucket, s3_key)
+                console.print(f"  ✅ Uploaded: {file_path.name}")
+                uploaded += 1
+            except Exception as e:
+                console.print(f"  ❌ Failed to upload {file_path.name}: {e}")
+        
+        console.print(f"[green]✅ Uploaded {uploaded}/{len(self.output_files)} files to S3[/green]")
+        return uploaded == len(self.output_files)
     
     def display_errors(self):
         """Display any errors that occurred during scanning"""
@@ -273,6 +302,10 @@ class AWSResourceInventory:
             
             # Export to Excel
             self.export_to_excel()
+            
+            # Upload to S3 if configured
+            if self.config.s3_bucket:
+                self.upload_to_s3()
             
             # Display errors
             self.display_errors()

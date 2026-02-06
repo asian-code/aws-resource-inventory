@@ -1,5 +1,6 @@
-sso-config.json
-!sso-config.json.example
+# Configuration files with sensitive data
+inventory-config.json
+!inventory-config.json.example
 
 
 # Python

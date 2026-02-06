@@ -1,20 +1,22 @@
 # AWS Resource Inventory Tool
 
-A comprehensive Python tool to scan **all AWS resources** across an entire AWS Organization and export the inventory to a multi-sheet Excel spreadsheet.
+A comprehensive Python tool to scan **all AWS resources** across an entire AWS Organization and export the inventory to individual Excel files per resource type.
 
 ## Features
 
-- 🔐 **AWS SSO Authentication** - Secure authentication using AWS Single Sign-On
-- 🏢 **Organization-wide Scanning** - Scans all accounts in your AWS Organization
+- 🔐 **AWS OIDC Authentication** - Secure authentication using GitHub Actions OIDC or environment credentials
+- 🏢 **Organization-wide Scanning** - Scans all accounts in your AWS Organization via cross-account role assumption
 - 🌍 **Multi-Region Support** - Configurable target regions (default: us-east-1, us-west-2)
 - ⚡ **Parallel Processing** - Multi-threaded scanning for speed and efficiency (20 workers)
-- 📊 **Multi-Sheet Excel Export** - One sheet per resource type with formatted output
-- 📈 **Summary Sheet** - Overview of all resources found with counts
+- 📊 **Individual Excel Files** - One Excel file per resource type (PascalCase naming)
+- 📈 **Summary File** - Overview of all resources found with counts
 - ❌ **Errors Sheet** - Tracks any skipped accounts or failures
 - 🛡️ **Account Blacklist** - Exclude specific accounts from scanning
+- ☁️ **S3 Upload** - Automatic upload to S3 bucket (CI/CD)
 - 🎨 **Rich CLI Output** - Beautiful progress bars and summary statistics
+- 🔄 **Scheduled Scans** - GitHub Actions workflow runs monthly (1st of each month)
 
-## Supported Resource Types (35 total)
+## Supported Resource Types (37 total)
 
 ### Compute
 - EC2 Instances
@@ -59,6 +61,10 @@ A comprehensive Python tool to scan **all AWS resources** across an entire AWS O
 - Secrets Manager Secrets
 - ACM Certificates
 
+### CloudFormation
+- CloudFormation Stacks
+- CloudFormation StackSets (Global)
+
 ### Other
 - CloudWatch Alarms
 - SNS Topics
@@ -70,8 +76,8 @@ A comprehensive Python tool to scan **all AWS resources** across an entire AWS O
 
 - Python 3.11 or higher
 - [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
-- AWS SSO access to your AWS Organization
-- Appropriate IAM permissions (read access to all scanned services)
+- AWS credentials with Organizations read access and ability to assume cross-account roles
+- Cross-account role (e.g., `AWSControlTowerExecution`) in each target account
 
 ## Installation
 
@@ -119,17 +125,17 @@ A comprehensive Python tool to scan **all AWS resources** across an entire AWS O
 
 ## Configuration
 
-Edit `sso-config.json` to match your environment:
+Edit `inventory-config.json` to match your environment:
 
 ```json
 {
-  "sso_start_url": "https://your-sso-portal.awsapps.com/start/#",
-  "sso_region": "us-east-1",
-  "role_name": "YourRoleName",
+  "cross_account_role_name": "AWSControlTowerExecution",
   "target_regions": ["us-east-1", "us-west-2"],
   "max_workers": 20,
+  "account_blacklist": [],
   "output_dir": "output",
-  "account_blacklist": []
+  "s3_bucket": null,
+  "s3_prefix": ""
 }
 ```
 
@@ -137,13 +143,13 @@ Edit `sso-config.json` to match your environment:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `sso_start_url` | Your AWS SSO portal URL | Required |
-| `sso_region` | Region where your SSO is configured | Required |
-| `role_name` | IAM role to assume in each account | Required |
+| `cross_account_role_name` | IAM role to assume in each account | `AWSControlTowerExecution` |
 | `target_regions` | List of AWS regions to scan | `["us-east-1", "us-west-2"]` |
 | `max_workers` | Number of parallel threads | `20` |
 | `output_dir` | Directory for output files | `"output"` |
 | `account_blacklist` | Account IDs to exclude from scanning | `[]` |
+| `s3_bucket` | S3 bucket for uploading results | `null` |
+| `s3_prefix` | Prefix/folder in S3 bucket | `""` |
 
 ### Account Blacklist Example
 
@@ -160,10 +166,15 @@ To exclude specific accounts from scanning:
 
 ## Usage
 
-### Running the Scanner
+### Running Locally
 
 With uv (recommended):
 ```bash
+# Set AWS credentials in environment first
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
 uv run aws-inventory
 ```
 
@@ -172,32 +183,55 @@ Or directly with Python:
 python -m aws_resource_inventory.main
 ```
 
-Traditional method:
-```bash
-python src/aws_resource_inventory/main.py
-```
+### GitHub Actions (Automated Monthly Scan)
+
+The included workflow (`.github/workflows/inventory-scan.yml`) runs automatically on the 1st of each month and uploads results to S3.
+
+**Setup:**
+1. Configure GitHub repository secret: `AWS_OIDC_ROLE_ARN`
+2. Ensure the OIDC role has permissions to:
+   - Read AWS Organizations
+   - Assume the cross-account role in all accounts
+   - Write to the S3 bucket
+
+**Manual Trigger:**
+- Go to Actions → "AWS Resource Inventory Scan" → "Run workflow"
+- Optionally disable S3 upload for testing
 
 ### What Happens
 
-1. **Authentication** - You'll be prompted to authorize via AWS SSO in your browser
-2. **Account Discovery** - Tool fetches all accounts in your organization
+1. **Credential Verification** - Validates AWS credentials
+2. **Account Discovery** - Fetches all accounts from AWS Organizations
 3. **Blacklist Filtering** - Excludes any accounts in the blacklist
-4. **Parallel Scanning** - Scans all 35 resource types across all accounts and regions
-5. **Excel Export** - Creates timestamped Excel file with multiple sheets
-6. **Summary Report** - Displays statistics and any errors
+4. **Parallel Scanning** - Scans all 37 resource types across all accounts and regions
+5. **Excel Export** - Creates individual Excel files per resource type
+6. **S3 Upload** - Uploads files to configured S3 bucket (if enabled)
+7. **Summary Report** - Displays statistics and any errors
 
 ## Output
 
-### Excel File Structure
+### Excel Files Structure
 
-The generated Excel file (`aws-inventory-YYYY-MM-DD_HH-MM-SS.xlsx`) contains:
+Individual files are created per resource type (PascalCase naming):
 
-1. **Summary Sheet** - Overview with:
-   - Scan timestamp
-   - Number of accounts scanned
-   - Number of regions scanned
-   - Total resource count
-   - Count per resource type
+```
+output/
+├── Ec2Instances.xlsx
+├── LambdaFunctions.xlsx
+├── S3Buckets.xlsx
+├── CloudFormationStacks.xlsx
+├── CloudFormationStackSets.xlsx
+├── ...
+└── Summary.xlsx
+```
+
+The **Summary.xlsx** file contains:
+- Scan timestamp
+- Number of accounts scanned
+- Number of regions scanned
+- Total resource count
+- Count per resource type
+- Errors/skipped accounts sheet
 
 2. **Resource Sheets** - One sheet per resource type (only created if resources exist):
    - Formatted headers with auto-filter
@@ -315,7 +349,7 @@ aws-resource-inventory/
 ├── .gitignore                # Git ignore rules
 ├── .pre-commit-config.yaml   # Pre-commit hooks
 ├── pyproject.toml            # Project config (replaces requirements.txt)
-├── sso-config.json           # AWS SSO configuration
+├── inventory-config.json     # AWS authentication configuration
 ├── uv.lock                   # Dependency lockfile
 └── README.md
 ```

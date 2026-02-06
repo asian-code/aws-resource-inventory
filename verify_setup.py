@@ -88,7 +88,7 @@ def main():
 
     # Project files
     print("\n📦 Project Files:")
-    all_good &= check_file(root / "sso-config.json", "SSO config")
+    all_good &= check_file(root / "inventory-config.json.example", "Config example")
     all_good &= check_directory(root / "output", "Output directory")
 
     # Summary

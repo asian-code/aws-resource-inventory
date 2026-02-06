@@ -1,5 +1,6 @@
 """Excel Exporter for AWS Resource Inventory"""
 
+import re
 from typing import List, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -13,8 +14,16 @@ from aws_resource_inventory.scanners.base import ScanResult
 console = Console()
 
 
+def to_pascal_case(text: str) -> str:
+    """Convert text to PascalCase for file naming"""
+    # Remove special characters and split on spaces/underscores/hyphens
+    words = re.split(r'[\s_\-]+', text)
+    # Capitalize first letter of each word
+    return ''.join(word.capitalize() for word in words if word)
+
+
 class ExcelExporter:
-    """Export scan results to multi-sheet Excel file"""
+    """Export scan results to individual Excel files per resource type"""
     
     def __init__(self, output_dir: Path):
         self.output_dir = output_dir
@@ -26,9 +35,9 @@ class ExcelExporter:
         errors: List[str],
         accounts_scanned: int,
         regions_scanned: int
-    ) -> Path:
+    ) -> List[Path]:
         """
-        Export all scan results to Excel with multiple sheets.
+        Export all scan results to individual Excel files.
         
         Args:
             results: List of ScanResult objects from all scanners
@@ -37,26 +46,65 @@ class ExcelExporter:
             regions_scanned: Number of regions per account
             
         Returns:
-            Path to the created Excel file
+            List of paths to created Excel files
         """
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        output_file = self.output_dir / f'aws-inventory-{timestamp}.xlsx'
+        console.print(f"\n[yellow]📊 Exporting to Excel files...[/yellow]")
         
-        console.print(f"\n[yellow]📊 Exporting to Excel...[/yellow]")
+        created_files = []
+        
+        # Create individual files for each resource type with data
+        for result in results:
+            if result.resources:  # Only create file if there are resources
+                file_path = self._create_resource_file(result, accounts_scanned, regions_scanned)
+                created_files.append(file_path)
+        
+        # Create summary file
+        summary_file = self._create_summary_file(results, errors, accounts_scanned, regions_scanned)
+        created_files.append(summary_file)
+        
+        console.print(f"[green]✅ Created {len(created_files)} Excel files in {self.output_dir}[/green]")
+        return created_files
+    
+    def _create_resource_file(
+        self, 
+        result: ScanResult, 
+        accounts_scanned: int, 
+        regions_scanned: int
+    ) -> Path:
+        """Create an individual Excel file for a resource type"""
+        # Generate PascalCase filename
+        filename = f"{to_pascal_case(result.sheet_name)}.xlsx"
+        output_file = self.output_dir / filename
         
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # Create Summary sheet first
-            self._create_summary_sheet(writer, results, accounts_scanned, regions_scanned)
+            df = pd.DataFrame(result.resources)
+            df.to_excel(writer, index=False, sheet_name=result.sheet_name[:31])
             
-            # Create sheets for each resource type (skip empty ones)
-            for result in results:
-                if result.resources:  # Only create sheet if there are resources
-                    self._create_resource_sheet(writer, result)
+            # Format the sheet
+            worksheet = writer.sheets[result.sheet_name[:31]]
+            self._format_resource_sheet(worksheet, df)
+        
+        console.print(f"  📁 {filename}: {len(result.resources)} resources")
+        return output_file
+    
+    def _create_summary_file(
+        self, 
+        results: List[ScanResult], 
+        errors: List[str],
+        accounts_scanned: int,
+        regions_scanned: int
+    ) -> Path:
+        """Create a summary Excel file with all resource counts"""
+        output_file = self.output_dir / 'Summary.xlsx'
+        
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            # Create Summary sheet
+            self._create_summary_sheet(writer, results, accounts_scanned, regions_scanned)
             
             # Create Errors sheet
             self._create_errors_sheet(writer, errors)
         
-        console.print(f"[green]✅ Excel file created: {output_file}[/green]")
+        console.print(f"  📁 Summary.xlsx: Overview and {len(errors)} errors/skipped")
         return output_file
     
     def _create_summary_sheet(
@@ -212,19 +260,19 @@ def create_inventory_report(
     output_dir: Path,
     accounts_scanned: int,
     regions_scanned: int
-) -> Path:
+) -> List[Path]:
     """
-    Convenience function to create the inventory Excel report.
+    Convenience function to create the inventory Excel reports.
     
     Args:
         results: List of ScanResult objects
         errors: List of error strings
-        output_dir: Directory to save the file
+        output_dir: Directory to save the files
         accounts_scanned: Number of accounts scanned
         regions_scanned: Number of regions
         
     Returns:
-        Path to created Excel file
+        List of paths to created Excel files
     """
     exporter = ExcelExporter(output_dir)
     return exporter.export(results, errors, accounts_scanned, regions_scanned)

@@ -1,0 +1,156 @@
+name: AWS Resource Inventory Scan
+
+on:
+  # Run on 1st of every month at 6:00 AM UTC
+  schedule:
+    - cron: '0 6 1 * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      upload_to_s3:
+        description: 'Upload results to S3'
+        required: false
+        type: boolean
+        default: true
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.14'
+  S3_BUCKET: 'aws-resource-export-rccl'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  scan-resources:
+    name: Scan AWS Resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate AWS OIDC Role Secret
+        run: |
+          if [ -z "${{ secrets.AWS_OIDC_ROLE_ARN }}" ]; then
+            echo "❌ ERROR: AWS_OIDC_ROLE_ARN secret is not set"
+            echo "Please configure the secret in repository settings"
+            exit 1
+          fi
+          echo "✅ AWS OIDC Role ARN is configured"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GHA-${{ github.run_id }}-ResourceInventory
+
+      - name: Verify AWS Credentials
+        run: |
+          echo "🔍 Verifying AWS credentials..."
+          aws sts get-caller-identity
+          echo ""
+          echo "🏢 Checking Organizations access..."
+          aws organizations describe-organization || echo "⚠️ No Organizations access"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras
+
+      - name: Run Resource Inventory Scan
+        env:
+          AWS_INVENTORY_CI: "true"
+          CROSS_ACCOUNT_ROLE_NAME: "AWSControlTowerExecution"
+          TARGET_REGIONS: "us-east-1,us-west-2"
+          MAX_WORKERS: "20"
+          OUTPUT_DIR: "output"
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+        run: |
+          echo "🚀 Starting AWS Resource Inventory Scan..."
+          echo "📅 Scan Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          
+          uv run python -m aws_resource_inventory.main
+
+      - name: List generated files
+        run: |
+          echo "📁 Generated files:"
+          ls -lh output/
+
+      - name: Upload to S3
+        if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_s3) }}
+        run: |
+          echo "☁️ Uploading files to S3..."
+          
+          # Sync all Excel files to S3 bucket (overwrites existing)
+          aws s3 sync output/ s3://${{ env.S3_BUCKET }}/ \
+            --exclude "*" \
+            --include "*.xlsx" \
+            --delete
+          
+          echo "✅ Files uploaded to s3://${{ env.S3_BUCKET }}/"
+          
+          # List uploaded files
+          echo ""
+          echo "📋 Files in S3 bucket:"
+          aws s3 ls s3://${{ env.S3_BUCKET }}/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-reports-${{ github.run_id }}
+          path: output/*.xlsx
+          retention-days: 30
+          compression-level: 9
+
+      - name: Generate Summary
+        run: |
+          echo "# 📊 AWS Resource Inventory Scan Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scan Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Regions**: us-east-1, us-west-2" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Generated Files" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ls -lh output/*.xlsx >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" == "schedule" ] || [ "${{ inputs.upload_to_s3 }}" == "true" ]; then
+            echo "## S3 Upload" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Files uploaded to \`s3://${{ env.S3_BUCKET }}/\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## S3 Upload" >> $GITHUB_STEP_SUMMARY
+            echo "⏭️ S3 upload skipped (manual run without upload flag)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Download" >> $GITHUB_STEP_SUMMARY
+          echo "Download the inventory reports from the **Artifacts** section below." >> $GITHUB_STEP_SUMMARY
+
+  notify-on-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: scan-resources
+    if: failure()
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "❌ AWS Resource Inventory Scan failed!"
+          echo "Check the workflow logs for details."
+          # Add Teams/Slack notification here if needed

@@ -45,6 +45,9 @@ from .sqs import SQSScanner
 from .apigateway import APIGatewayScanner
 from .cloudfront import CloudFrontScanner
 
+# CloudFormation Scanners
+from .cloudformation import CloudFormationStackScanner, CloudFormationStackSetScanner
+
 
 # List of all available scanners (instantiated)
 def get_all_scanners():
@@ -100,6 +103,10 @@ def get_all_scanners():
         SQSScanner(),
         APIGatewayScanner(),
         CloudFrontScanner(),
+        
+        # CloudFormation
+        CloudFormationStackScanner(),
+        CloudFormationStackSetScanner(),
     ]
 
 
@@ -149,4 +156,6 @@ __all__ = [
     'SQSScanner',
     'APIGatewayScanner',
     'CloudFrontScanner',
+    'CloudFormationStackScanner',
+    'CloudFormationStackSetScanner',
 ]
